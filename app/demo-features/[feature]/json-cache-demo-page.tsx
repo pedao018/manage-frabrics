@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
-
-const CACHE_NAME = "manage-frabrics-demo-cache-v1";
-const CACHE_KEY = "/__demo-cache/input-text-json-cache.json";
+import { jsonCacheConfig } from "@/config/demo-features";
+import { createClient } from "@/utils/supabase/client";
 
 export default function JsonCacheDemo({ title }: { title: string }) {
   const [input, setInput] = useState("");
   const [message, setMessage] = useState("");
   const [cachedJson, setCachedJson] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isReadingServer, setIsReadingServer] = useState(false);
 
   async function saveToCache() {
     setMessage("");
@@ -19,11 +20,11 @@ export default function JsonCacheDemo({ title }: { title: string }) {
         throw new Error("The Cache API is not available in this browser.");
       }
 
-      const cache = await window.caches.open(CACHE_NAME);
+      const cache = await window.caches.open(jsonCacheConfig.cacheName);
       const json = JSON.stringify({ value: input });
 
       await cache.put(
-        CACHE_KEY,
+        jsonCacheConfig.cacheKey,
         new Response(json, {
           headers: { "Content-Type": "application/json" },
         }),
@@ -46,8 +47,8 @@ export default function JsonCacheDemo({ title }: { title: string }) {
         throw new Error("The Cache API is not available in this browser.");
       }
 
-      const cache = await window.caches.open(CACHE_NAME);
-      const response = await cache.match(CACHE_KEY);
+      const cache = await window.caches.open(jsonCacheConfig.cacheName);
+      const response = await cache.match(jsonCacheConfig.cacheKey);
 
       if (!response) {
         setMessage("There is no saved JSON in the cache yet.");
@@ -73,8 +74,8 @@ export default function JsonCacheDemo({ title }: { title: string }) {
         throw new Error("The Cache API is not available in this browser.");
       }
 
-      const cache = await window.caches.open(CACHE_NAME);
-      const wasDeleted = await cache.delete(CACHE_KEY);
+      const cache = await window.caches.open(jsonCacheConfig.cacheName);
+      const wasDeleted = await cache.delete(jsonCacheConfig.cacheKey);
 
       setMessage(
         wasDeleted
@@ -85,6 +86,104 @@ export default function JsonCacheDemo({ title }: { title: string }) {
       setMessage(
         `Could not clear cache: ${error instanceof Error ? error.message : "An unknown error occurred."}`,
       );
+    }
+  }
+
+  async function saveJsonToServer() {
+    setMessage("");
+    setIsUploading(true);
+
+    try {
+      const supabase = createClient();
+      const json = JSON.stringify({ value: input }, null, 2);
+      const fileName = `${jsonCacheConfig.storageFileNamePrefix}-${crypto.randomUUID()}.json`;
+      const objectPath = `${jsonCacheConfig.storageObjectFolder}/${fileName}`;
+      const file = new File([json], fileName, { type: "application/json" });
+      const { error } = await supabase.storage
+        .from(jsonCacheConfig.storageBucketName)
+        .upload(objectPath, file, {
+          contentType: "application/json",
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      setMessage(
+        `Saved JSON to Supabase Storage: ${jsonCacheConfig.storageBucketName}/${objectPath}`,
+      );
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "An unknown error occurred.";
+
+      setMessage(
+        errorMessage === "Bucket not found"
+          ? `Could not save JSON to Supabase Storage: the "${jsonCacheConfig.storageBucketName}" bucket does not exist. Create it in Supabase Storage or update storageBucketName in config/demo-features.ts to match an existing bucket.`
+          : errorMessage.includes("row-level security policy")
+            ? `Could not save JSON to Supabase Storage: this app has no sign-in flow, so the request uses the anon role. Add an INSERT policy for anon on the "${jsonCacheConfig.storageBucketName}" bucket and "${jsonCacheConfig.storageObjectFolder}/" folder, or add sign-in and authorize authenticated users.`
+            : `Could not save JSON to Supabase Storage: ${errorMessage}`,
+      );
+      console.error("Error saving JSON to Supabase Storage:", error);
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  async function readJsonFromServer() {
+    setMessage("");
+    setCachedJson(null);
+    setIsReadingServer(true);
+
+    try {
+      const supabase = createClient();
+      const bucket = supabase.storage.from(jsonCacheConfig.storageBucketName);
+      const { data: files, error: listError } = await bucket.list(
+        jsonCacheConfig.storageObjectFolder,
+        {
+          limit: 100,
+          search: `${jsonCacheConfig.storageFileNamePrefix}-`,
+          sortBy: { column: "created_at", order: "desc" },
+        },
+      );
+
+      if (listError) {
+        throw listError;
+      }
+
+      const latestFile = files.find(
+        (file) =>
+          file.name.startsWith(`${jsonCacheConfig.storageFileNamePrefix}-`) &&
+          file.name.endsWith(".json"),
+      );
+
+      if (!latestFile) {
+        setMessage("There are no saved JSON files in Supabase Storage yet.");
+        return;
+      }
+
+      const objectPath = `${jsonCacheConfig.storageObjectFolder}/${latestFile.name}`;
+      const { data: file, error: downloadError } =
+        await bucket.download(objectPath);
+
+      if (downloadError) {
+        throw downloadError;
+      }
+
+      const data: unknown = JSON.parse(await file.text());
+      setCachedJson(JSON.stringify(data, null, 2));
+      setMessage(`Read JSON from Supabase Storage: ${objectPath}`);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "An unknown error occurred.";
+
+      setMessage(
+        errorMessage.includes("row-level security policy")
+          ? `Could not read JSON from Supabase Storage: add a SELECT policy for the current role on the "${jsonCacheConfig.storageBucketName}" bucket and "${jsonCacheConfig.storageObjectFolder}/" folder.`
+          : `Could not read JSON from Supabase Storage: ${errorMessage}`,
+      );
+      console.error("Error reading JSON from Supabase Storage:", error);
+    } finally {
+      setIsReadingServer(false);
     }
   }
 
@@ -125,6 +224,22 @@ export default function JsonCacheDemo({ title }: { title: string }) {
             type="button"
           >
             Clear cache
+          </button>
+          <button
+            className="rounded-md border border-neutral-300 px-5 py-3 font-medium transition-colors hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isUploading}
+            onClick={saveJsonToServer}
+            type="button"
+          >
+            {isUploading ? "Saving JSON..." : "Save JSON to Server"}
+          </button>
+          <button
+            className="rounded-md border border-neutral-300 px-5 py-3 font-medium text-neutral-900 transition-colors hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isReadingServer}
+            onClick={readJsonFromServer}
+            type="button"
+          >
+            {isReadingServer ? "Reading JSON..." : "Read JSON from Server"}
           </button>
         </div>
 

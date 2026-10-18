@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { demoFeatures } from "../demo-features-page";
+import { demoFeatureSlugs, demoFeatures } from "@/config/demo-features";
 import JsonCacheDemo from "./json-cache-demo-page";
 
 export function generateStaticParams() {
@@ -18,7 +18,7 @@ export default async function FeaturePage({
     notFound();
   }
 
-  if (slug === "input-text-json-cache") {
+  if (slug === demoFeatureSlugs.inputTextJsonCache) {
     return <JsonCacheDemo title={feature.title} />;
   }
 

@@ -1,27 +1,5 @@
 import Link from "next/link";
-
-export const demoFeatures = [
-  {
-    slug: "input-text-json-cache",
-    title: "Input text -> JSON Cache. Read cache",
-  },
-  {
-    slug: "save-read-json-server",
-    title: "Input text -> Save and Read JSON from Server",
-  },
-  {
-    slug: "qr-scan-local-image",
-    title: "QR Scan. Read QR image from file local",
-  },
-  {
-    slug: "capture-recording-picture-video",
-    title: "Capture. Recording. Open picture, open video",
-  },
-  {
-    slug: "recording-local-storage",
-    title: "Recording. Save and Read from local",
-  },
-] as const;
+import { demoFeatures } from "@/config/demo-features";
 
 export default function DemoFeaturesPage() {
   return (
