@@ -1,6 +1,9 @@
 import { notFound } from "next/navigation";
 import { demoFeatureSlugs, demoFeatures } from "@/config/demo-features";
 import JsonCacheDemo from "./json-cache-demo-page";
+import QrScanDemo from "./qr-scan-demo-page";
+import CaptureMediaDemo from "./capture-media-demo-page";
+import VoiceRecordingDemo from "./voice-recording-demo-page";
 
 export function generateStaticParams() {
   return demoFeatures.map(({ slug }) => ({ feature: slug }));
@@ -20,6 +23,18 @@ export default async function FeaturePage({
 
   if (slug === demoFeatureSlugs.inputTextJsonCache) {
     return <JsonCacheDemo title={feature.title} />;
+  }
+
+  if (slug === demoFeatureSlugs.qrScanLocalImage) {
+    return <QrScanDemo title={feature.title} />;
+  }
+
+  if (slug === demoFeatureSlugs.captureRecordingPictureVideo) {
+    return <CaptureMediaDemo title={feature.title} />;
+  }
+
+  if (slug === demoFeatureSlugs.recordingLocalStorage) {
+    return <VoiceRecordingDemo title={feature.title} />;
   }
 
   return (
