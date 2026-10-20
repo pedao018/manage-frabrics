@@ -17,12 +17,17 @@ type SpeechResultEvent = Event & {
   }>;
 };
 
+type SpeechErrorEvent = Event & {
+  error?: string;
+};
+
 type SpeechRecognitionLike = {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
   onresult: ((event: SpeechResultEvent) => void) | null;
-  onerror: ((event: Event) => void) | null;
+  onerror: ((event: SpeechErrorEvent) => void) | null;
+  onend: (() => void) | null;
   start(): void;
   stop(): void;
 };
@@ -97,6 +102,9 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const transcriptRef = useRef("");
+  const finalTranscriptRef = useRef("");
+  const isRecordingRef = useRef(false);
+  const speechRecognitionFailedRef = useRef(false);
   const audioUrlRef = useRef<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [transcript, setTranscript] = useState("");
@@ -150,6 +158,8 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
   async function startRecording() {
     setMessage("");
     transcriptRef.current = "";
+    finalTranscriptRef.current = "";
+    speechRecognitionFailedRef.current = false;
     setTranscript("");
 
     if (!navigator.mediaDevices?.getUserMedia || !("MediaRecorder" in window)) {
@@ -180,6 +190,7 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
         stream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
         recorderRef.current = null;
+        isRecordingRef.current = false;
         setIsRecording(false);
 
         if (audio.size === 0) {
@@ -224,24 +235,88 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
         recognition.interimResults = true;
         recognition.lang = navigator.language || "en-US";
         recognition.onresult = (event) => {
-          let resultTranscript = "";
-          for (let index = 0; index < event.results.length; index += 1) {
-            resultTranscript += `${event.results[index][0].transcript} `;
+          let interimTranscript = "";
+          const startIndex = Math.max(0, event.resultIndex);
+
+          for (let index = startIndex; index < event.results.length; index += 1) {
+            const result = event.results[index];
+            const text = result[0].transcript.trim();
+            if (result.isFinal) {
+              finalTranscriptRef.current = [
+                finalTranscriptRef.current,
+                text,
+              ]
+                .filter(Boolean)
+                .join(" ");
+            } else {
+              interimTranscript = [interimTranscript, text]
+                .filter(Boolean)
+                .join(" ");
+            }
           }
-          transcriptRef.current = resultTranscript.trim();
+
+          transcriptRef.current = [
+            finalTranscriptRef.current,
+            interimTranscript,
+          ]
+            .filter(Boolean)
+            .join(" ");
           setTranscript(transcriptRef.current);
         };
-        recognition.onerror = () => {
+        recognition.onerror = (event) => {
+          const errorMessages: Record<string, string> = {
+            "not-allowed":
+              "Microphone access for speech recognition was denied. Allow microphone access and try again.",
+            "service-not-allowed":
+              "This browser's speech recognition service is unavailable.",
+            "language-not-supported":
+              "Speech recognition does not support the selected browser language.",
+            "audio-capture":
+              "Speech recognition could not access the microphone.",
+            network:
+              "Speech recognition requires a network connection in this browser.",
+            "no-speech": "No speech detected yet. Keep speaking to transcribe.",
+          };
+          const fatalErrors = new Set([
+            "not-allowed",
+            "service-not-allowed",
+            "language-not-supported",
+            "audio-capture",
+          ]);
+
+          if (event.error && fatalErrors.has(event.error)) {
+            speechRecognitionFailedRef.current = true;
+          }
           setMessage(
-            "Audio is recording, but speech recognition is unavailable. The audio file will still be saved.",
+            errorMessages[event.error ?? ""] ??
+              `Speech recognition error${event.error ? `: ${event.error}` : ""}. Audio recording will continue.`,
           );
+        };
+        recognition.onend = () => {
+          if (
+            !isRecordingRef.current ||
+            recognitionRef.current !== recognition ||
+            speechRecognitionFailedRef.current
+          ) {
+            return;
+          }
+
+          try {
+            recognition.start();
+          } catch (error) {
+            speechRecognitionFailedRef.current = true;
+            setMessage(
+              `Speech recognition stopped: ${error instanceof Error ? error.message : "restart was rejected by the browser."} Audio recording will continue.`,
+            );
+          }
         };
         recognitionRef.current = recognition;
         try {
           recognition.start();
-        } catch {
+        } catch (error) {
+          speechRecognitionFailedRef.current = true;
           setMessage(
-            "Audio is recording, but speech recognition could not start. The audio file will still be saved.",
+            `Audio recording will continue, but speech recognition could not start: ${error instanceof Error ? error.message : "the browser rejected the request."}`,
           );
         }
       } else {
@@ -251,10 +326,12 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
       }
 
       recorder.start();
+      isRecordingRef.current = true;
       setIsRecording(true);
     } catch (error) {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
+      isRecordingRef.current = false;
       setMessage(
         `Could not start recording: ${error instanceof Error ? error.message : "An unknown error occurred."}`,
       );
@@ -262,6 +339,7 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
   }
 
   function stopRecording() {
+    isRecordingRef.current = false;
     recognitionRef.current?.stop();
     recognitionRef.current = null;
 
