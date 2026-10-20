@@ -25,6 +25,7 @@ type SpeechRecognitionLike = {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
+  onstart: (() => void) | null;
   onresult: ((event: SpeechResultEvent) => void) | null;
   onerror: ((event: SpeechErrorEvent) => void) | null;
   onend: (() => void) | null;
@@ -103,13 +104,18 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
   const chunksRef = useRef<Blob[]>([]);
   const transcriptRef = useRef("");
   const finalTranscriptRef = useRef("");
+  const sessionFinalTranscriptRef = useRef("");
   const isRecordingRef = useRef(false);
   const speechRecognitionFailedRef = useRef(false);
   const audioUrlRef = useRef<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [transcript, setTranscript] = useState("");
   const [isRecording, setIsRecording] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [transcriptionStatus, setTranscriptionStatus] = useState(
+    "Speech transcription will appear here while recording.",
+  );
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -159,19 +165,24 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
     setMessage("");
     transcriptRef.current = "";
     finalTranscriptRef.current = "";
+    sessionFinalTranscriptRef.current = "";
     speechRecognitionFailedRef.current = false;
     setTranscript("");
+    setTranscriptionStatus("Requesting microphone access...");
 
     if (!navigator.mediaDevices?.getUserMedia || !("MediaRecorder" in window)) {
-      setMessage(
-        "Audio recording is unavailable in this browser. Use a supported browser over HTTPS or localhost.",
-      );
+      const error =
+        "Audio recording is unavailable in this browser. Use a supported browser over HTTPS or localhost.";
+      setTranscriptionStatus(error);
+      setMessage(error);
       return;
     }
 
+    setIsStarting(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+      setTranscriptionStatus("Starting speech recognition...");
       const recorder = new MediaRecorder(stream);
       const chunks: Blob[] = [];
       chunksRef.current = chunks;
@@ -234,20 +245,21 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
         recognition.continuous = true;
         recognition.interimResults = true;
         recognition.lang = navigator.language || "en-US";
+        recognition.onstart = () => {
+          setTranscriptionStatus("Listening for speech...");
+        };
         recognition.onresult = (event) => {
           let interimTranscript = "";
-          const startIndex = Math.max(0, event.resultIndex);
+          let sessionFinalTranscript = "";
 
-          for (let index = startIndex; index < event.results.length; index += 1) {
+          for (let index = 0; index < event.results.length; index += 1) {
             const result = event.results[index];
             const text = result[0].transcript.trim();
             if (result.isFinal) {
-              finalTranscriptRef.current = [
-                finalTranscriptRef.current,
+              sessionFinalTranscript = [
+                sessionFinalTranscript,
                 text,
-              ]
-                .filter(Boolean)
-                .join(" ");
+              ].filter(Boolean).join(" ");
             } else {
               interimTranscript = [interimTranscript, text]
                 .filter(Boolean)
@@ -255,13 +267,20 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
             }
           }
 
+          sessionFinalTranscriptRef.current = sessionFinalTranscript;
           transcriptRef.current = [
             finalTranscriptRef.current,
+            sessionFinalTranscript,
             interimTranscript,
           ]
             .filter(Boolean)
             .join(" ");
           setTranscript(transcriptRef.current);
+          setTranscriptionStatus(
+            transcriptRef.current
+              ? "Transcribing speech..."
+              : "Listening for speech...",
+          );
         };
         recognition.onerror = (event) => {
           const errorMessages: Record<string, string> = {
@@ -282,31 +301,51 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
             "service-not-allowed",
             "language-not-supported",
             "audio-capture",
+            "network",
           ]);
 
           if (event.error && fatalErrors.has(event.error)) {
             speechRecognitionFailedRef.current = true;
           }
-          setMessage(
+          const errorMessage =
             errorMessages[event.error ?? ""] ??
-              `Speech recognition error${event.error ? `: ${event.error}` : ""}. Audio recording will continue.`,
-          );
+            `Speech recognition error${event.error ? `: ${event.error}` : ""}.`;
+          setTranscriptionStatus(errorMessage);
+          if (event.error !== "no-speech") {
+            setMessage(`${errorMessage} Audio recording will continue.`);
+          }
         };
         recognition.onend = () => {
+          finalTranscriptRef.current = [
+            finalTranscriptRef.current,
+            sessionFinalTranscriptRef.current,
+          ]
+            .filter(Boolean)
+            .join(" ");
+          sessionFinalTranscriptRef.current = "";
+          transcriptRef.current = finalTranscriptRef.current;
+          setTranscript(transcriptRef.current);
+
           if (
             !isRecordingRef.current ||
             recognitionRef.current !== recognition ||
             speechRecognitionFailedRef.current
           ) {
+            if (speechRecognitionFailedRef.current && isRecordingRef.current) {
+              setTranscriptionStatus(
+                "Speech recognition stopped. Audio is still recording.",
+              );
+            }
             return;
           }
 
           try {
+            setTranscriptionStatus("Restarting speech recognition...");
             recognition.start();
           } catch (error) {
             speechRecognitionFailedRef.current = true;
-            setMessage(
-              `Speech recognition stopped: ${error instanceof Error ? error.message : "restart was rejected by the browser."} Audio recording will continue.`,
+            setTranscriptionStatus(
+              `Speech recognition stopped: ${error instanceof Error ? error.message : "restart was rejected by the browser."} Audio is still recording.`,
             );
           }
         };
@@ -315,13 +354,13 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
           recognition.start();
         } catch (error) {
           speechRecognitionFailedRef.current = true;
-          setMessage(
-            `Audio recording will continue, but speech recognition could not start: ${error instanceof Error ? error.message : "the browser rejected the request."}`,
+          setTranscriptionStatus(
+            `Speech recognition could not start: ${error instanceof Error ? error.message : "the browser rejected the request."}`,
           );
         }
       } else {
-        setMessage(
-          "Audio is recording. Live speech-to-text is not supported by this browser.",
+        setTranscriptionStatus(
+          "Live speech-to-text is not supported by this browser. Audio recording will continue.",
         );
       }
 
@@ -332,9 +371,14 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
       isRecordingRef.current = false;
+      setTranscriptionStatus(
+        `Could not start recording: ${error instanceof Error ? error.message : "An unknown error occurred."}`,
+      );
       setMessage(
         `Could not start recording: ${error instanceof Error ? error.message : "An unknown error occurred."}`,
       );
+    } finally {
+      setIsStarting(false);
     }
   }
 
@@ -372,11 +416,13 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
 
       <button
         className="rounded-md bg-neutral-900 px-5 py-3 font-medium text-white transition-colors hover:bg-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
-        disabled={isSaving}
+        disabled={isSaving || isStarting}
         onClick={isRecording ? stopRecording : startRecording}
         type="button"
       >
-        {isSaving
+        {isStarting
+          ? "Requesting microphone..."
+          : isSaving
           ? "Saving recording..."
           : isRecording
             ? "Stop recording"
@@ -390,8 +436,12 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
         <h2 className="text-lg font-medium" id="transcript-heading">
           Voice to text
         </h2>
-        <p aria-live="polite" className="mt-3 whitespace-pre-wrap text-sm">
-          {transcript || "Speech transcription will appear here while recording."}
+        <p
+          aria-live="polite"
+          aria-atomic="true"
+          className="mt-3 whitespace-pre-wrap text-sm"
+        >
+          {transcript || transcriptionStatus}
         </p>
       </section>
 
