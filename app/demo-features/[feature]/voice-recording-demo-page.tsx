@@ -35,6 +35,8 @@ type SpeechRecognitionLike = {
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
+const maxSpeechRecognitionRetries = 5;
+
 function openRecordingDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(voiceRecordingConfig.databaseName, 1);
@@ -107,16 +109,85 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
   const sessionFinalTranscriptRef = useRef("");
   const isRecordingRef = useRef(false);
   const speechRecognitionFailedRef = useRef(false);
+  const speechRecognitionFailureMessageRef = useRef("");
+  const speechRecognitionRetryCountRef = useRef(0);
+  const speechRecognitionRestartTimerRef = useRef<number | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const recordingBlobRef = useRef<Blob | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [transcript, setTranscript] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcriptionStatus, setTranscriptionStatus] = useState(
     "Speech transcription will appear here while recording.",
   );
   const [message, setMessage] = useState("");
+
+  async function transcribeRecording(audio: Blob): Promise<void> {
+    setIsTranscribing(true);
+    setTranscriptionStatus("Sending the recording for speech transcription...");
+
+    const formData = new FormData();
+    const extension = audio.type.includes("mp4")
+      ? "mp4"
+      : audio.type.includes("ogg")
+        ? "ogg"
+        : "webm";
+    formData.append("file", audio, `recording.${extension}`);
+
+    try {
+      const response = await fetch("/api/transcribe", {
+        method: "POST",
+        body: formData,
+      });
+      const result = (await response.json()) as {
+        error?: unknown;
+        transcript?: unknown;
+      };
+
+      if (!response.ok) {
+        throw new Error(
+          typeof result.error === "string"
+            ? result.error
+            : "The transcription service could not process this recording.",
+        );
+      }
+
+      const recognizedText =
+        typeof result.transcript === "string" ? result.transcript.trim() : "";
+      if (!recognizedText) {
+        setTranscriptionStatus(
+          "No speech was detected in the recording. Try speaking closer to the microphone.",
+        );
+        return;
+      }
+
+      transcriptRef.current = recognizedText;
+      finalTranscriptRef.current = recognizedText;
+      setTranscript(recognizedText);
+      setTranscriptionStatus("Transcription complete.");
+      try {
+        await saveRecording({
+          audio,
+          transcript: recognizedText,
+          savedAt: Date.now(),
+        });
+        setMessage("Recording and transcript saved on this device.");
+      } catch (error) {
+        setMessage(
+          `Transcription completed, but could not save it locally: ${error instanceof Error ? error.message : "An unknown error occurred."}`,
+        );
+      }
+    } catch (error) {
+      setTranscriptionStatus(
+        `Could not transcribe the recording: ${error instanceof Error ? error.message : "An unknown error occurred."}`,
+      );
+    } finally {
+      setIsTranscribing(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +197,7 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
         if (cancelled || !recording) {
           return;
         }
+        recordingBlobRef.current = recording.audio;
         const url = URL.createObjectURL(recording.audio);
         audioUrlRef.current = url;
         setAudioUrl(url);
@@ -145,6 +217,9 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
       cancelled = true;
       recorderRef.current?.stop();
       recognitionRef.current?.stop();
+      if (speechRecognitionRestartTimerRef.current !== null) {
+        window.clearTimeout(speechRecognitionRestartTimerRef.current);
+      }
       streamRef.current?.getTracks().forEach((track) => track.stop());
       if (audioUrlRef.current) {
         URL.revokeObjectURL(audioUrlRef.current);
@@ -167,6 +242,12 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
     finalTranscriptRef.current = "";
     sessionFinalTranscriptRef.current = "";
     speechRecognitionFailedRef.current = false;
+    speechRecognitionFailureMessageRef.current = "";
+    speechRecognitionRetryCountRef.current = 0;
+    if (speechRecognitionRestartTimerRef.current !== null) {
+      window.clearTimeout(speechRecognitionRestartTimerRef.current);
+      speechRecognitionRestartTimerRef.current = null;
+    }
     setTranscript("");
     setTranscriptionStatus("Requesting microphone access...");
 
@@ -198,6 +279,7 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
         const audio = new Blob(chunks, {
           type: recorder.mimeType || "audio/webm",
         });
+        recordingBlobRef.current = audio;
         stream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
         recorderRef.current = null;
@@ -276,6 +358,8 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
             .filter(Boolean)
             .join(" ");
           setTranscript(transcriptRef.current);
+          speechRecognitionRetryCountRef.current = 0;
+          setMessage("");
           setTranscriptionStatus(
             transcriptRef.current
               ? "Transcribing speech..."
@@ -293,7 +377,7 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
             "audio-capture":
               "Speech recognition could not access the microphone.",
             network:
-              "Speech recognition requires a network connection in this browser.",
+              "Speech recognition lost its connection. Retrying...",
             "no-speech": "No speech detected yet. Keep speaking to transcribe.",
           };
           const fatalErrors = new Set([
@@ -301,18 +385,24 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
             "service-not-allowed",
             "language-not-supported",
             "audio-capture",
-            "network",
           ]);
 
           if (event.error && fatalErrors.has(event.error)) {
             speechRecognitionFailedRef.current = true;
+            speechRecognitionFailureMessageRef.current =
+              errorMessages[event.error] ??
+              `Speech recognition failed: ${event.error}.`;
           }
           const errorMessage =
             errorMessages[event.error ?? ""] ??
             `Speech recognition error${event.error ? `: ${event.error}` : ""}.`;
           setTranscriptionStatus(errorMessage);
-          if (event.error !== "no-speech") {
-            setMessage(`${errorMessage} Audio recording will continue.`);
+          if (event.error === "network") {
+            setTranscriptionStatus(
+              "Speech recognition connection lost. Retrying while audio recording continues.",
+            );
+          } else if (event.error !== "no-speech") {
+            setTranscriptionStatus(`${errorMessage} Audio recording will continue.`);
           }
         };
         recognition.onend = () => {
@@ -332,22 +422,47 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
             speechRecognitionFailedRef.current
           ) {
             if (speechRecognitionFailedRef.current && isRecordingRef.current) {
-              setTranscriptionStatus(
-                "Speech recognition stopped. Audio is still recording.",
-              );
+              const failureMessage =
+                speechRecognitionFailureMessageRef.current ||
+                "The browser stopped speech recognition.";
+              setTranscriptionStatus(`${failureMessage} Audio is still recording.`);
             }
             return;
           }
 
-          try {
-            setTranscriptionStatus("Restarting speech recognition...");
-            recognition.start();
-          } catch (error) {
-            speechRecognitionFailedRef.current = true;
-            setTranscriptionStatus(
-              `Speech recognition stopped: ${error instanceof Error ? error.message : "restart was rejected by the browser."} Audio is still recording.`,
-            );
+          if (
+            speechRecognitionRetryCountRef.current >=
+            maxSpeechRecognitionRetries
+          ) {
+            const failureMessage =
+              "The browser speech service returned repeated network errors. Check your internet connection or try a browser with a working speech-recognition service.";
+            setTranscriptionStatus(`${failureMessage} Audio is still recording.`);
+            return;
           }
+
+          speechRecognitionRetryCountRef.current += 1;
+          const retryNumber = speechRecognitionRetryCountRef.current;
+          setTranscriptionStatus(
+            `Reconnecting speech recognition (${retryNumber}/${maxSpeechRecognitionRetries})...`,
+          );
+          speechRecognitionRestartTimerRef.current = window.setTimeout(() => {
+            speechRecognitionRestartTimerRef.current = null;
+            if (
+              !isRecordingRef.current ||
+              recognitionRef.current !== recognition
+            ) {
+              return;
+            }
+
+            try {
+              recognition.start();
+            } catch (error) {
+              speechRecognitionFailedRef.current = true;
+              setTranscriptionStatus(
+                `Could not restart speech recognition: ${error instanceof Error ? error.message : "the browser rejected the request."} Audio is still recording.`,
+              );
+            }
+          }, Math.min(1000 * 2 ** (retryNumber - 1), 8000));
         };
         recognitionRef.current = recognition;
         try {
@@ -384,6 +499,10 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
 
   function stopRecording() {
     isRecordingRef.current = false;
+    if (speechRecognitionRestartTimerRef.current !== null) {
+      window.clearTimeout(speechRecognitionRestartTimerRef.current);
+      speechRecognitionRestartTimerRef.current = null;
+    }
     recognitionRef.current?.stop();
     recognitionRef.current = null;
 
@@ -428,6 +547,30 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
             ? "Stop recording"
             : "Recording voice"}
       </button>
+
+      {audioUrl && !transcript && !isRecording && (
+        <div className="w-full max-w-xl text-center">
+          <p className="mb-3 text-sm text-neutral-600">
+            If live transcription did not work, you can send the saved audio to
+            OpenAI to transcribe it. This requires an API key and may incur
+            charges.
+          </p>
+          <button
+            className="rounded-md border border-neutral-400 px-5 py-3 font-medium transition-colors hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isSaving || isTranscribing}
+            onClick={() => {
+              if (recordingBlobRef.current) {
+                void transcribeRecording(recordingBlobRef.current);
+              }
+            }}
+            type="button"
+          >
+            {isTranscribing
+              ? "Transcribing recording..."
+              : "Transcribe saved recording online"}
+          </button>
+        </div>
+      )}
 
       <section
         aria-labelledby="transcript-heading"
