@@ -4,6 +4,7 @@ import JsonCacheDemo from "./json-cache-demo-page";
 import QrScanDemo from "./qr-scan-demo-page";
 import CaptureMediaDemo from "./capture-media-demo-page";
 import VoiceRecordingDemo from "./voice-recording-demo-page";
+import SpeechToTextDemo from "./speech-to-text";
 
 export function generateStaticParams() {
   return demoFeatures.map(({ slug }) => ({ feature: slug }));
@@ -35,6 +36,10 @@ export default async function FeaturePage({
 
   if (slug === demoFeatureSlugs.recordingLocalStorage) {
     return <VoiceRecordingDemo title={feature.title} />;
+  }
+
+  if (slug === demoFeatureSlugs.speechToText) {
+    return <SpeechToTextDemo title={feature.title} />;
   }
 
   return (

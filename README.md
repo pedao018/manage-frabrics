@@ -26,13 +26,13 @@ environment, set `NEXT_PUBLIC_SUPABASE_URL` and
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, then restart the development server.
 Use `.env.example` as a template for the required local environment variables.
 
-The voice-recording demo uses browser speech recognition for live transcription.
-If that service is unavailable, choose **Transcribe saved recording online** to
-send the saved audio to OpenAI. This requires an OpenAI API key and may incur
-charges. Set `OPENAI_API_KEY` in the Git-ignored `.env.local` file for local
-development and as a server-only environment variable in Vercel. Do not use a
-`NEXT_PUBLIC_` prefix for this key. Transcription requests are limited to 25 MB
-and five per minute per IP per server instance.
+The voice-recording demo captures audio from the microphone, saves it in this
+browser's IndexedDB storage, and allows playback of the saved recording. The
+separate Speech to Text demo uses the browser's Web Speech Recognition API for
+live transcription. It does not upload audio to a transcription server or
+require an API key. Browser support, recognition quality, and network
+requirements vary; unsupported browsers and recognition errors are shown in
+the page.
 
 The home page reads rows from the Supabase `public.todos` table and displays
 each row's `name`. The table should include `id` and `name` columns, and the
