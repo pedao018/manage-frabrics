@@ -31,6 +31,17 @@ type SpeechRecognitionLike = {
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
+const speechLanguages = [
+  { label: "English", locale: "en-US" },
+  { label: "Vietnamese", locale: "vi-VN" },
+] as const;
+
+type SpeechLanguage = (typeof speechLanguages)[number]["locale"];
+
+function isSpeechLanguage(value: string): value is SpeechLanguage {
+  return speechLanguages.some((language) => language.locale === value);
+}
+
 const speechRecognitionErrors: Record<string, string> = {
   "not-allowed":
     "Microphone permission was denied. Allow microphone access in your browser settings, then try again.",
@@ -53,6 +64,7 @@ export default function SpeechToTextDemo({ title }: { title: string }) {
   const errorMessageRef = useRef("");
   const [transcript, setTranscript] = useState("");
   const [isListening, setIsListening] = useState(false);
+  const [language, setLanguage] = useState<SpeechLanguage>("en-US");
   const [message, setMessage] = useState("");
 
   useEffect(
@@ -87,7 +99,7 @@ export default function SpeechToTextDemo({ title }: { title: string }) {
     const recognition = new Recognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = navigator.language || "en-US";
+    recognition.lang = language;
     recognitionRef.current = recognition;
     isListeningRef.current = true;
     setIsListening(true);
@@ -185,6 +197,27 @@ export default function SpeechToTextDemo({ title }: { title: string }) {
         </p>
       </section>
 
+      <label className="flex items-center gap-3 text-sm" htmlFor="speech-language">
+        Recognition language
+        <select
+          className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-neutral-900 disabled:opacity-60"
+          disabled={isListening}
+          id="speech-language"
+          onChange={(event) => {
+            if (isSpeechLanguage(event.target.value)) {
+              setLanguage(event.target.value);
+            }
+          }}
+          value={language}
+        >
+          {speechLanguages.map((option) => (
+            <option key={option.locale} value={option.locale}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
       <button
         className="rounded-md bg-neutral-900 px-5 py-3 font-medium text-white transition-colors hover:bg-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900"
         onClick={isListening ? stopListening : startListening}
@@ -193,12 +226,20 @@ export default function SpeechToTextDemo({ title }: { title: string }) {
         {isListening ? "Stop listening" : "Start listening"}
       </button>
 
-      <p aria-live="polite" className="max-w-xl text-center text-sm text-neutral-600">
+      <p
+        aria-live="polite"
+        className={`max-w-xl text-center text-sm ${
+          message === "Live transcription is active."
+            ? "speech-status-active"
+            : "text-neutral-600"
+        }`}
+      >
         {message}
       </p>
       <p className="max-w-xl text-center text-xs text-neutral-500">
         Recognition is provided by your browser. Availability and network
-        requirements vary between browsers and devices.
+        requirements vary between browsers and devices. Only the selected
+        language is recognized during each listening session.
       </p>
     </main>
   );
