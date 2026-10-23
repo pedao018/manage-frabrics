@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { demoFeatureSlugs, demoFeatures } from "@/config/demo-features";
 import JsonCacheDemo from "./json-cache-demo-page";
@@ -10,7 +11,25 @@ export function generateStaticParams() {
   return demoFeatures.map(({ slug }) => ({ feature: slug }));
 }
 
-export default async function FeaturePage({
+export default function FeaturePage({
+  params,
+}: {
+  params: Promise<{ feature: string }>;
+}) {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center bg-white px-6 text-neutral-900">
+          <p>Loading demo...</p>
+        </main>
+      }
+    >
+      <FeatureContent params={params} />
+    </Suspense>
+  );
+}
+
+async function FeatureContent({
   params,
 }: {
   params: Promise<{ feature: string }>;

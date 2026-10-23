@@ -42,3 +42,7 @@ export const jsonCacheConfig = {
   storageObjectFolder: "demos",
   storageFileNamePrefix: demoFeatureSlugs.inputTextJsonCache,
 } as const;
+
+export const appConfig = {
+  tagLine: "WebManageFrabrics",
+ }

@@ -1,5 +1,6 @@
 "use client";
 
+import { appConfig } from "@/config/demo-features";
 import { useEffect, useRef, useState } from "react";
 
 type SpeechRecognitionResultLike = ArrayLike<{
@@ -66,6 +67,7 @@ export default function SpeechToTextDemo({ title }: { title: string }) {
   const [isListening, setIsListening] = useState(false);
   const [language, setLanguage] = useState<SpeechLanguage>("en-US");
   const [message, setMessage] = useState("");
+  const [isSecureContext, setIsSecureContext] = useState<boolean | null>(null);
 
   useEffect(
     () => () => {
@@ -77,6 +79,7 @@ export default function SpeechToTextDemo({ title }: { title: string }) {
   );
 
   function startListening() {
+    setIsSecureContext(window.isSecureContext);
     setTranscript("");
     finalTranscriptRef.current = "";
     errorMessageRef.current = "";
@@ -93,6 +96,7 @@ export default function SpeechToTextDemo({ title }: { title: string }) {
       setMessage(
         "Speech recognition is not supported in this browser. Try another browser that supports Web Speech Recognition.",
       );
+      console.error(`${appConfig.tagLine} Speech recognition is not supported in this browser`, Recognition);
       return;
     }
 
@@ -136,6 +140,10 @@ export default function SpeechToTextDemo({ title }: { title: string }) {
       setTranscript(
         [finalTranscriptRef.current, interimTranscript].filter(Boolean).join(" "),
       );
+      console.log(`${appConfig.tagLine} Speech recognition result:`, {
+        finalTranscript: finalTranscriptRef.current,
+        interimTranscript,
+      });
       setMessage("Live transcription is active.");
     };
 
@@ -146,6 +154,11 @@ export default function SpeechToTextDemo({ title }: { title: string }) {
         speechRecognitionErrors[event.error] ??
         `Speech recognition is unavailable or failed${event.error ? ` (${event.error})` : ""}.`;
       setMessage(errorMessageRef.current);
+      console.error(`${appConfig.tagLine} Speech recognition error:`, {
+        error: event.error,
+        isSecureContext: window.isSecureContext,
+        origin: window.location.origin,
+      });
     };
 
     recognition.onend = () => {
@@ -158,6 +171,7 @@ export default function SpeechToTextDemo({ title }: { title: string }) {
           errorMessageRef.current ||
             "Speech recognition stopped unexpectedly. Press Start listening to try again.",
         );
+        console.error(`${appConfig.tagLine} Speech recognition ended unexpectedly.`);
       }
     };
 
@@ -170,6 +184,7 @@ export default function SpeechToTextDemo({ title }: { title: string }) {
       setMessage(
         `Could not start speech recognition: ${error instanceof Error ? error.message : "the browser rejected the request."}`,
       );
+      console.error(`${appConfig.tagLine} Speech recognition start error:`, error);
     }
   }
 
