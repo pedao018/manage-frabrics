@@ -5,29 +5,8 @@ import { voiceRecordingConfig } from "@/config/demo-features";
 
 type SavedRecording = {
   audio: Blob;
-  transcript: string;
   savedAt: number;
 };
-
-type SpeechResultEvent = Event & {
-  resultIndex: number;
-  results: ArrayLike<{
-    0: { transcript: string };
-    isFinal: boolean;
-  }>;
-};
-
-type SpeechRecognitionLike = {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  onresult: ((event: SpeechResultEvent) => void) | null;
-  onerror: ((event: Event) => void) | null;
-  start(): void;
-  stop(): void;
-};
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
 function openRecordingDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -94,13 +73,10 @@ async function loadRecording(): Promise<SavedRecording | undefined> {
 export default function VoiceRecordingDemo({ title }: { title: string }) {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const transcriptRef = useRef("");
   const audioUrlRef = useRef<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [transcript, setTranscript] = useState("");
   const [isRecording, setIsRecording] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -115,8 +91,6 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
         const url = URL.createObjectURL(recording.audio);
         audioUrlRef.current = url;
         setAudioUrl(url);
-        transcriptRef.current = recording.transcript;
-        setTranscript(recording.transcript);
         setMessage("Loaded the saved recording from this device.");
       })
       .catch((error: unknown) => {
@@ -130,7 +104,6 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
     return () => {
       cancelled = true;
       recorderRef.current?.stop();
-      recognitionRef.current?.stop();
       streamRef.current?.getTracks().forEach((track) => track.stop());
       if (audioUrlRef.current) {
         URL.revokeObjectURL(audioUrlRef.current);
@@ -149,22 +122,20 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
 
   async function startRecording() {
     setMessage("");
-    transcriptRef.current = "";
-    setTranscript("");
 
     if (!navigator.mediaDevices?.getUserMedia || !("MediaRecorder" in window)) {
-      setMessage(
-        "Audio recording is unavailable in this browser. Use a supported browser over HTTPS or localhost.",
-      );
+      const error =
+        "Audio recording is unavailable in this browser. Use a supported browser over HTTPS or localhost.";
+      setMessage(error);
       return;
     }
 
+    setIsStarting(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       const recorder = new MediaRecorder(stream);
       const chunks: Blob[] = [];
-      chunksRef.current = chunks;
       recorderRef.current = recorder;
 
       recorder.addEventListener("dataavailable", (event) => {
@@ -191,7 +162,6 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
         setIsSaving(true);
         void saveRecording({
           audio,
-          transcript: transcriptRef.current.trim(),
           savedAt: Date.now(),
         })
           .then(() => setMessage("Recording saved on this device."))
@@ -211,45 +181,6 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
         setIsRecording(false);
       });
 
-      const speechWindow = window as Window & {
-        SpeechRecognition?: SpeechRecognitionConstructor;
-        webkitSpeechRecognition?: SpeechRecognitionConstructor;
-      };
-      const SpeechRecognition =
-        speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
-
-      if (SpeechRecognition) {
-        const recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = navigator.language || "en-US";
-        recognition.onresult = (event) => {
-          let resultTranscript = "";
-          for (let index = 0; index < event.results.length; index += 1) {
-            resultTranscript += `${event.results[index][0].transcript} `;
-          }
-          transcriptRef.current = resultTranscript.trim();
-          setTranscript(transcriptRef.current);
-        };
-        recognition.onerror = () => {
-          setMessage(
-            "Audio is recording, but speech recognition is unavailable. The audio file will still be saved.",
-          );
-        };
-        recognitionRef.current = recognition;
-        try {
-          recognition.start();
-        } catch {
-          setMessage(
-            "Audio is recording, but speech recognition could not start. The audio file will still be saved.",
-          );
-        }
-      } else {
-        setMessage(
-          "Audio is recording. Live speech-to-text is not supported by this browser.",
-        );
-      }
-
       recorder.start();
       setIsRecording(true);
     } catch (error) {
@@ -258,13 +189,12 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
       setMessage(
         `Could not start recording: ${error instanceof Error ? error.message : "An unknown error occurred."}`,
       );
+    } finally {
+      setIsStarting(false);
     }
   }
 
   function stopRecording() {
-    recognitionRef.current?.stop();
-    recognitionRef.current = null;
-
     if (recorderRef.current?.state === "recording") {
       recorderRef.current.stop();
     }
@@ -294,28 +224,18 @@ export default function VoiceRecordingDemo({ title }: { title: string }) {
 
       <button
         className="rounded-md bg-neutral-900 px-5 py-3 font-medium text-white transition-colors hover:bg-neutral-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
-        disabled={isSaving}
+        disabled={isSaving || isStarting}
         onClick={isRecording ? stopRecording : startRecording}
         type="button"
       >
-        {isSaving
+        {isStarting
+          ? "Requesting microphone..."
+          : isSaving
           ? "Saving recording..."
           : isRecording
             ? "Stop recording"
             : "Recording voice"}
       </button>
-
-      <section
-        aria-labelledby="transcript-heading"
-        className="min-h-32 w-full max-w-xl rounded-md border border-neutral-300 p-6"
-      >
-        <h2 className="text-lg font-medium" id="transcript-heading">
-          Voice to text
-        </h2>
-        <p aria-live="polite" className="mt-3 whitespace-pre-wrap text-sm">
-          {transcript || "Speech transcription will appear here while recording."}
-        </p>
-      </section>
 
       <p aria-live="polite" className="text-center text-sm text-neutral-600">
         {message}

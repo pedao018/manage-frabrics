@@ -24,6 +24,15 @@ The Supabase client packages are included in the project dependencies. Local
 configuration is stored in the Git-ignored `.env.local` file. For another
 environment, set `NEXT_PUBLIC_SUPABASE_URL` and
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, then restart the development server.
+Use `.env.example` as a template for the required local environment variables.
+
+The voice-recording demo captures audio from the microphone, saves it in this
+browser's IndexedDB storage, and allows playback of the saved recording. The
+separate Speech to Text demo uses the browser's Web Speech Recognition API for
+live transcription. It does not upload audio to a transcription server or
+require an API key. Browser support, recognition quality, and network
+requirements vary; unsupported browsers and recognition errors are shown in
+the page.
 
 The home page reads rows from the Supabase `public.todos` table and displays
 each row's `name`. The table should include `id` and `name` columns, and the

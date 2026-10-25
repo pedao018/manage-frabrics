@@ -5,6 +5,8 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 type MediaKind = "image" | "video";
 
 const videoMimeTypes = [
+  "video/mp4;codecs=avc1.42E01E",
+  "video/mp4",
   "video/webm;codecs=vp9",
   "video/webm;codecs=vp8",
   "video/webm",
@@ -112,6 +114,10 @@ export default function CaptureMediaDemo({ title }: { title: string }) {
   }
 
   function stopCamera() {
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.srcObject = null;
+    }
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setIsCameraOpen(false);
@@ -179,7 +185,7 @@ export default function CaptureMediaDemo({ title }: { title: string }) {
         stream,
         mimeType ? { mimeType } : undefined,
       );
-      const chunks: BlobPart[] = [];
+      const chunks: Blob[] = [];
       discardRecordingRef.current = false;
       recorderRef.current = recorder;
 
@@ -192,7 +198,11 @@ export default function CaptureMediaDemo({ title }: { title: string }) {
       recorder.addEventListener("stop", () => {
         if (!discardRecordingRef.current && chunks.length > 0) {
           const videoBlob = new Blob(chunks, {
-            type: recorder.mimeType || "video/webm",
+            type:
+              recorder.mimeType ||
+              chunks.find((chunk) => chunk.type)?.type ||
+              mimeType ||
+              "video/webm",
           });
           setMediaKind("video");
           setMediaUrl(URL.createObjectURL(videoBlob));
@@ -238,6 +248,7 @@ export default function CaptureMediaDemo({ title }: { title: string }) {
             aria-label="Live camera preview"
             autoPlay
             className="h-full max-h-[28rem] w-full object-contain"
+            key="camera-preview"
             muted
             playsInline
             ref={videoRef}
@@ -254,6 +265,12 @@ export default function CaptureMediaDemo({ title }: { title: string }) {
             aria-label="Captured or selected video"
             className="max-h-[28rem] w-full object-contain"
             controls
+            key={mediaUrl}
+            onError={(event) => {
+              setMessage(
+                `Could not play this video: ${event.currentTarget.error?.message || "the recording format may not be supported by this browser."}`,
+              );
+            }}
             playsInline
             src={mediaUrl}
           />

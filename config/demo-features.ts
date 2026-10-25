@@ -3,6 +3,7 @@ export const demoFeatureSlugs = {
   qrScanLocalImage: "qr-scan-local-image",
   captureRecordingPictureVideo: "capture-recording-picture-video",
   recordingLocalStorage: "recording-local-storage",
+  speechToText: "speech-to-text",
 } as const;
 
 export const demoFeatures = [
@@ -22,6 +23,10 @@ export const demoFeatures = [
     slug: demoFeatureSlugs.recordingLocalStorage,
     title: "Recording. Save and Read from local",
   },
+  {
+    slug: demoFeatureSlugs.speechToText,
+    title: "Speech to Text. Convert audio to text",
+  }
 ] as const;
 
 export const voiceRecordingConfig = {
@@ -37,3 +42,7 @@ export const jsonCacheConfig = {
   storageObjectFolder: "demos",
   storageFileNamePrefix: demoFeatureSlugs.inputTextJsonCache,
 } as const;
+
+export const appConfig = {
+  tagLine: "WebManageFrabrics",
+ }
